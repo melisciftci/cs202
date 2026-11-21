@@ -1,9 +1,4 @@
--- CS 202 | University Library Management System
-
-
 BEGIN;
-
--- Shared tables
 
 CREATE TABLE university_department (
     department_id integer PRIMARY KEY CHECK (department_id > 0),
@@ -32,7 +27,6 @@ CREATE TABLE organization (
         CHECK (is_publisher OR is_supplier OR is_digital_provider)
 );
 
--- Catalog and item hierarchy
 
 CREATE TABLE book_series (
     series_id integer PRIMARY KEY CHECK (series_id > 0),
@@ -140,7 +134,7 @@ CREATE TABLE describes_subject (
     PRIMARY KEY (subject_id, item_id)
 );
 
--- Members
+
 
 CREATE TABLE member (
     member_id integer PRIMARY KEY CHECK (member_id > 0),
@@ -199,7 +193,6 @@ CREATE TABLE librarian (
     UNIQUE (librarian_id, branch_id)
 );
 
--- Spaces and equipment
 
 CREATE TABLE floor (
     floor_id integer PRIMARY KEY CHECK (floor_id > 0),
@@ -263,7 +256,6 @@ CREATE TABLE maintenance_request (
     CHECK (completion_date >= request_date)
 );
 
--- Acquisitions
 
 CREATE TABLE purchase_request (
     request_id integer PRIMARY KEY CHECK (request_id > 0),
@@ -365,7 +357,6 @@ CREATE TABLE physical_copy (
     CHECK (purchase_order_id IS NULL OR (donation_id IS NULL AND edition_id IS NOT NULL))
 );
 
--- Loans and incidents
 
 CREATE TABLE loan_policy (
     policy_id integer PRIMARY KEY CHECK (policy_id > 0),
@@ -454,7 +445,6 @@ CREATE TABLE incident_report (
         )
 );
 
--- Inventory and transfers
 
 CREATE TABLE inventory_check (
     check_id integer PRIMARY KEY CHECK (check_id > 0),
@@ -490,7 +480,6 @@ CREATE TABLE copy_transfer (
     CHECK (arrival_date IS NULL OR (dispatch_date IS NOT NULL AND arrival_date >= dispatch_date))
 );
 
--- Events and digital services
 
 CREATE TABLE library_event (
     event_id integer PRIMARY KEY CHECK (event_id > 0),
@@ -543,7 +532,6 @@ CREATE TABLE digital_access_record (
     FOREIGN KEY (license_id, resource_id) REFERENCES digital_license (license_id, resource_id)
 );
 
--- Supplier offers and approval
 
 CREATE TABLE offers (
     organization_id integer NOT NULL REFERENCES organization (organization_id),
@@ -566,7 +554,6 @@ CREATE TABLE approves (
     FOREIGN KEY (librarian_id, branch_id) REFERENCES librarian (librarian_id, branch_id)
 );
 
--- Course reserves and interlibrary loans
 
 CREATE TABLE course (
     course_id integer PRIMARY KEY CHECK (course_id > 0),
@@ -609,10 +596,7 @@ CREATE TABLE interlibrary_loan (
     CHECK (return_date >= request_date)
 );
 
--- PostgreSQL constraint triggers implement cross-table rules. Run the file
--- with the target schema first on the search path. Item is total and disjoint.
--- Validation runs at commit, after both rows have been entered.
--- An organization may hold several roles. Each relationship requires its own role.
+
 CREATE FUNCTION check_organization_role() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -628,7 +612,7 @@ BEGIN
     WHERE organization_id = NEW.organization_id
     FOR SHARE;
 
-    -- The foreign key handles missing organizations.
+   
     IF FOUND AND NOT role_allowed THEN
         RAISE EXCEPTION 'Organization % must have the % role for %',
             NEW.organization_id, TG_ARGV[0], TG_TABLE_NAME
@@ -747,19 +731,19 @@ AFTER INSERT OR UPDATE OR DELETE ON media
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW EXECUTE FUNCTION check_item_subtype();
 
--- Each physical copy or piece of equipment can have one open loan.
+
 CREATE UNIQUE INDEX loan_one_open_copy
     ON loan (copy_id) WHERE copy_id IS NOT NULL AND return_date IS NULL;
 
 CREATE UNIQUE INDEX loan_one_open_equipment
     ON loan (equipment_id) WHERE equipment_id IS NOT NULL AND return_date IS NULL;
 
--- A transfer without an arrival date is open unless it was cancelled.
+
 CREATE UNIQUE INDEX copy_transfer_one_open_copy
     ON copy_transfer (copy_id)
     WHERE arrival_date IS NULL AND lower(btrim(status)) NOT IN ('cancelled', 'canceled');
 
--- Only a resolution status of Resolved closes a Lost report.
+
 CREATE UNIQUE INDEX incident_report_one_unresolved_loss_per_copy
     ON incident_report (copy_id)
     WHERE report_type = 'Lost' AND lower(btrim(resolution_status)) <> 'resolved';
