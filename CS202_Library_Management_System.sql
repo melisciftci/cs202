@@ -1,6 +1,6 @@
 -- CS 202 | University Library Management System
 -- PostgreSQL. Run this file in an empty database using the Query Tool or psql.
--- The 62 tables follow the revised relational schema in Library(3).docx.
+-- The 62 tables follow Library.docx and Library_Feedback_Changes_Revised.pdf.
 -- Data types, local checks, and composite references enforce structural integrity.
 
 BEGIN;
@@ -450,7 +450,7 @@ CREATE TABLE incident_report (
         CHECK (report_type IN ('Lost', 'Damage')),
     CONSTRAINT incident_report_required_fields
         CHECK (
-            (report_type = 'Lost' AND member_id IS NOT NULL)
+            (report_type = 'Lost' AND member_id IS NOT NULL AND severity IS NULL)
             OR
             (report_type = 'Damage' AND librarian_id IS NOT NULL AND severity IS NOT NULL)
         )
@@ -611,9 +611,72 @@ CREATE TABLE interlibrary_loan (
     CHECK (return_date >= request_date)
 );
 
--- Item is total and disjoint. The parent and its subtype may be inserted
--- in either order allowed by their foreign keys within one transaction.
+-- PostgreSQL constraint triggers implement cross-table rules. Run the file
+-- with the target schema first on the search path. Item is total and disjoint.
 -- Validation runs at commit, after both rows have been entered.
+-- An organization may hold several roles. Each relationship requires its own role.
+CREATE FUNCTION check_organization_role() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    role_allowed boolean;
+BEGIN
+    SELECT CASE TG_ARGV[0]
+               WHEN 'publisher' THEN is_publisher
+               WHEN 'supplier' THEN is_supplier
+               WHEN 'digital provider' THEN is_digital_provider
+           END
+    INTO role_allowed
+    FROM organization
+    WHERE organization_id = NEW.organization_id
+    FOR SHARE;
+
+    -- The foreign key handles missing organizations.
+    IF FOUND AND NOT role_allowed THEN
+        RAISE EXCEPTION 'Organization % must have the % role for %',
+            NEW.organization_id, TG_ARGV[0], TG_TABLE_NAME
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER book_edition_publisher
+BEFORE INSERT OR UPDATE OF organization_id ON book_edition
+FOR EACH ROW EXECUTE FUNCTION check_organization_role('publisher');
+
+CREATE TRIGGER purchase_order_supplier
+BEFORE INSERT OR UPDATE OF organization_id ON purchase_order
+FOR EACH ROW EXECUTE FUNCTION check_organization_role('supplier');
+
+CREATE TRIGGER offers_supplier
+BEFORE INSERT OR UPDATE OF organization_id ON offers
+FOR EACH ROW EXECUTE FUNCTION check_organization_role('supplier');
+
+CREATE TRIGGER digital_resource_provider
+BEFORE INSERT OR UPDATE OF organization_id ON digital_resource
+FOR EACH ROW EXECUTE FUNCTION check_organization_role('digital provider');
+
+CREATE FUNCTION prevent_removal_of_used_organization_role() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF (OLD.is_publisher AND NOT NEW.is_publisher
+        AND EXISTS (SELECT 1 FROM book_edition WHERE organization_id = OLD.organization_id))
+       OR (OLD.is_supplier AND NOT NEW.is_supplier
+           AND (EXISTS (SELECT 1 FROM purchase_order WHERE organization_id = OLD.organization_id)
+                OR EXISTS (SELECT 1 FROM offers WHERE organization_id = OLD.organization_id)))
+       OR (OLD.is_digital_provider AND NOT NEW.is_digital_provider
+           AND EXISTS (SELECT 1 FROM digital_resource WHERE organization_id = OLD.organization_id)) THEN
+        RAISE EXCEPTION 'Cannot remove an organization role still in use for organization %',
+            OLD.organization_id USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER organization_role_in_use
+BEFORE UPDATE OF is_publisher, is_supplier, is_digital_provider ON organization
+FOR EACH ROW EXECUTE FUNCTION prevent_removal_of_used_organization_role();
+
 CREATE FUNCTION validate_item_subtype(target_id integer) RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE
