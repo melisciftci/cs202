@@ -1,7 +1,5 @@
 -- CS 202 | University Library Management System
--- PostgreSQL. Run this file in an empty database using the Query Tool or psql.
--- The 62 tables follow Library.docx and Library_Feedback_Changes_Revised.pdf.
--- Data types, local checks, and composite references enforce structural integrity.
+
 
 BEGIN;
 
